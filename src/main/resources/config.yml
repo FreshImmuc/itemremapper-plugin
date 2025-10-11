@@ -1,0 +1,36 @@
+# ItemRemapper Configuration
+# Format:
+# MATERIAL_NAME:
+#   name: "Display Name"  # Optional: Custom display name
+#   lore:                 # Optional: Custom lore (supports multiple lines)
+#     - "Line 1"
+#     - "Line 2"
+#
+# Short format (name only): MATERIAL_NAME: "Display Name"
+#
+# Use Minecraft material names from: https://hub.spigotmc.org/javadocs/spigot/org/bukkit/Material.html
+
+item-remaps:
+  DIAMOND:
+    name: "§b§lGlänzender Diamant"
+    lore:
+      - "§7Ein seltener Edelstein"
+      - "§7von unschätzbarem Wert."
+  IRON_SWORD:
+    name: "§f§lEisenschwert"
+    lore:
+      - "§7Zuverlässig und robust"
+      - "§7für jeden Abenteurer."
+  GOLDEN_APPLE:
+    name: "§6§lGoldener Apfel"
+    lore:
+      - "§eVerleiht besondere Kräfte"
+      - "§7Ein seltener Fund."
+  ENCHANTED_BOOK:
+    name: "§d§lVerzaubertes Buch"
+    lore:
+      - "§7Enthält mächtige Magie"
+      - "§7Kann auf Werkzeuge angewendet werden."
+
+# Debug mode - prints messages when items are remapped
+debug: true
