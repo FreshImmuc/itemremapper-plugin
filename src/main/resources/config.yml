@@ -31,6 +31,28 @@ item-remaps:
     lore:
       - "§7Enthält mächtige Magie"
       - "§7Kann auf Werkzeuge angewendet werden."
+  
+  # Music Disc Examples - for jukebox functionality
+  MUSIC_DISC_13:
+    name: "§6§l13 - C418"
+    lore:
+      - "§7Ein mysteriöser Klassiker"
+      - "§7von den frühen Tagen."
+  MUSIC_DISC_CAT:
+    name: "§a§lCat - C418"
+    lore:
+      - "§7Eine fröhliche Melodie"
+      - "§7die zum Tanzen einlädt."
+  MUSIC_DISC_BLOCKS:
+    name: "§c§lblocks - C418"
+    lore:
+      - "§7Rhythmische Beats"
+      - "§7für Baumeister."
+  MUSIC_DISC_CHIRP:
+    name: "§e§lchirp - C418"
+    lore:
+      - "§7Zarte Klänge wie"
+      - "§7Vogelgezwitscher am Morgen."
 
 # Debug mode - prints messages when items are remapped
 debug: true

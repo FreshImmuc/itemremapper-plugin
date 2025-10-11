@@ -64,6 +64,8 @@ public class ItemRemapperPlugin extends JavaPlugin {
             jukeboxListener = new JukeboxListener(this);
         }
         jukeboxListener.setupProtocolLib();
+        jukeboxListener.startCacheCleanupTask();
+        jukeboxListener.startJukeboxScanner();
         getServer().getPluginManager().registerEvents(jukeboxListener, this);
         
         // Register command
