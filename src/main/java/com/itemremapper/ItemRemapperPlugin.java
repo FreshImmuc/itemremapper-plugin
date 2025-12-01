@@ -20,15 +20,19 @@ public class ItemRemapperPlugin extends JavaPlugin {
     }
     
     /**
-     * Inner class to hold item remap data (name and lore)
+     * Inner class to hold item remap data (name, lore, sound, and duration)
      */
     public static class ItemRemap {
         private final String displayName;
         private final List<String> lore;
+        private final String customSound;
+        private final int duration; // Duration in seconds
         
-        public ItemRemap(String displayName, List<String> lore) {
+        public ItemRemap(String displayName, List<String> lore, String customSound, int duration) {
             this.displayName = displayName;
             this.lore = lore;
+            this.customSound = customSound;
+            this.duration = duration;
         }
         
         public String getDisplayName() {
@@ -39,12 +43,24 @@ public class ItemRemapperPlugin extends JavaPlugin {
             return lore;
         }
         
+        public String getCustomSound() {
+            return customSound;
+        }
+        
+        public int getDuration() {
+            return duration;
+        }
+        
         public boolean hasDisplayName() {
             return displayName != null;
         }
         
         public boolean hasLore() {
             return lore != null && !lore.isEmpty();
+        }
+        
+        public boolean hasCustomSound() {
+            return customSound != null && !customSound.isEmpty();
         }
     }
 
@@ -107,17 +123,19 @@ public class ItemRemapperPlugin extends JavaPlugin {
                     if (remapsSection.isString(key)) {
                         // Simple format: MATERIAL: "Display Name"
                         String displayName = remapsSection.getString(key);
-                        itemRemaps.put(materialKey, new ItemRemap(displayName, null));
+                        itemRemaps.put(materialKey, new ItemRemap(displayName, null, null, 0));
                     } else if (remapsSection.isConfigurationSection(key)) {
                         // Complex format with name and/or lore
                         var itemSection = remapsSection.getConfigurationSection(key);
                         if (itemSection != null) {
                             String displayName = itemSection.getString("name");
                             List<String> lore = itemSection.getStringList("lore");
+                            String customSound = itemSection.getString("sound");
+                            int duration = itemSection.getInt("duration", 0);
                             
                             // Only add if at least name or lore is present
                             if (displayName != null || (lore != null && !lore.isEmpty())) {
-                                itemRemaps.put(materialKey, new ItemRemap(displayName, lore));
+                                itemRemaps.put(materialKey, new ItemRemap(displayName, lore, customSound, duration));
                             }
                         }
                     }

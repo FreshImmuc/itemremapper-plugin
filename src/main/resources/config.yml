@@ -38,21 +38,42 @@ item-remaps:
     lore:
       - "§7Ein mysteriöser Klassiker"
       - "§7von den frühen Tagen."
+    sound: "music_disc.13"
+    duration: 178  # Duration in seconds
   MUSIC_DISC_CAT:
     name: "§a§lCat - C418"
     lore:
       - "§7Eine fröhliche Melodie"
       - "§7die zum Tanzen einlädt."
+    sound: "music_disc.cat"
+    duration: 185
   MUSIC_DISC_BLOCKS:
     name: "§c§lblocks - C418"
     lore:
       - "§7Rhythmische Beats"
       - "§7für Baumeister."
+    sound: "music_disc.blocks"
+    duration: 345
   MUSIC_DISC_CHIRP:
     name: "§e§lchirp - C418"
     lore:
       - "§7Zarte Klänge wie"
       - "§7Vogelgezwitscher am Morgen."
+    sound: "music_disc.chirp"
+    duration: 185
+
+# Jukebox settings
+jukebox:
+  # Whether to enable custom jukebox sound replacement
+  enabled: true
+  # Range in blocks for hearing jukebox sounds (vanilla is 64)
+  sound-range: 64
+  # Volume of custom sounds (0.0 to 1.0)
+  volume: 1.0
+  # Pitch of custom sounds (0.5 to 2.0, 1.0 is normal)
+  pitch: 1.0
+  # Whether to automatically eject disc after song ends
+  auto-eject: true
 
 # Debug mode - prints messages when items are remapped
 debug: true
