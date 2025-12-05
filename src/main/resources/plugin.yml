@@ -2,6 +2,7 @@ name: ItemRemapper
 version: ${project.version}
 main: com.itemremapper.ItemRemapperPlugin
 api-version: '1.21'
+folia-supported: true
 author: Immuc
 description: Automatically remaps item names when they enter player inventories and customizes jukebox messages
 softdepend: [ProtocolLib]

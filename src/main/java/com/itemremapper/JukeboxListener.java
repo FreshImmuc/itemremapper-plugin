@@ -7,6 +7,7 @@ import com.comphenix.protocol.events.PacketAdapter;
 import com.comphenix.protocol.events.PacketContainer;
 import com.comphenix.protocol.events.PacketEvent;
 import com.comphenix.protocol.wrappers.WrappedChatComponent;
+import com.comphenix.protocol.wrappers.BlockPosition;
 import net.md_5.bungee.api.ChatMessageType;
 import net.md_5.bungee.api.chat.TextComponent;
 import org.bukkit.*;
@@ -19,7 +20,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.scheduler.BukkitTask;
+import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -43,6 +44,11 @@ public class JukeboxListener implements Listener {
     private final Map<String, Long> sentCustomMessages = new ConcurrentHashMap<>();
     private static final long MESSAGE_COOLDOWN = 2000; // 2 seconds
     
+    // Track jukebox positions that just had a disc inserted
+    // We only cancel sounds coming from these specific locations
+    private final Map<String, Long> pendingJukeboxSounds = new ConcurrentHashMap<>();
+    private static final long JUKEBOX_SOUND_WINDOW = 500; // 500ms window to cancel original sound
+    
     // Config values
     private boolean jukeboxEnabled;
     private int soundRange;
@@ -58,12 +64,12 @@ public class JukeboxListener implements Listener {
         final String customSound;
         final int duration;
         final Set<UUID> playersHearing;
-        final BukkitTask ejectionTask;
-        final BukkitTask playerTrackingTask;
+        final ScheduledTask ejectionTask;
+        final ScheduledTask playerTrackingTask;
         final long startTime;
         
         ActiveJukebox(String discType, String customSound, int duration, 
-                     BukkitTask ejectionTask, BukkitTask playerTrackingTask) {
+                     ScheduledTask ejectionTask, ScheduledTask playerTrackingTask) {
             this.discType = discType;
             this.customSound = customSound;
             this.duration = duration;
@@ -210,10 +216,28 @@ public class JukeboxListener implements Listener {
             // Check if it's a music disc sound
             if (soundName != null && (soundName.contains("music_disc") || 
                 soundName.contains("music.disc") || soundName.contains("record"))) {
-                // Cancel the vanilla sound
-                event.setCancelled(true);
                 
-                plugin.debug("✓ Cancelled NAMED_SOUND_EFFECT: " + soundName);
+                // Get the sound position (coordinates are in fixed-point format * 8)
+                try {
+                    int x = packet.getIntegers().read(0) / 8;
+                    int y = packet.getIntegers().read(1) / 8;
+                    int z = packet.getIntegers().read(2) / 8;
+                    
+                    String posKey = x + "," + y + "," + z;
+                    
+                    // Only cancel if this position is in our pending list (recent disc insert)
+                    long currentTime = System.currentTimeMillis();
+                    Long insertTime = pendingJukeboxSounds.get(posKey);
+                    
+                    if (insertTime != null && (currentTime - insertTime) <= JUKEBOX_SOUND_WINDOW) {
+                        event.setCancelled(true);
+                        plugin.debug("✓ Cancelled NAMED_SOUND_EFFECT from tracked jukebox at " + posKey + ": " + soundName);
+                    } else {
+                        plugin.debug("Allowing NAMED_SOUND_EFFECT (not from tracked jukebox): " + soundName + " at " + posKey);
+                    }
+                } catch (Exception e) {
+                    plugin.debug("Could not get sound position, allowing: " + soundName);
+                }
             }
         } catch (Exception e) {
             if (plugin.isDebugMode()) {
@@ -235,21 +259,21 @@ public class JukeboxListener implements Listener {
             
             // 1010 = Play record, 1011 = Stop playing record
             if (eventId == 1010) {
-                // Cancel the world event that triggers the sound
-                // This prevents the client from playing the sound
-                event.setCancelled(true);
+                // Get the block position from the packet
+                BlockPosition blockPos = packet.getBlockPositionModifier().read(0);
+                String posKey = blockPos.getX() + "," + blockPos.getY() + "," + blockPos.getZ();
                 
-                if (plugin.isDebugMode()) {
-                    // Try to get additional data for debugging
-                    try {
-                        int recordId = packet.getIntegers().read(1);
-                        plugin.debug("WORLD_EVENT 1010 (jukebox play): recordId=" + recordId);
-                    } catch (Exception ignored) {
-                        plugin.debug("WORLD_EVENT 1010 (jukebox play)");
-                    }
+                // Check if this jukebox is in our pending list
+                long currentTime = System.currentTimeMillis();
+                Long insertTime = pendingJukeboxSounds.get(posKey);
+                
+                if (insertTime != null && (currentTime - insertTime) <= JUKEBOX_SOUND_WINDOW) {
+                    // Cancel the world event from tracked jukebox
+                    event.setCancelled(true);
+                    plugin.debug("✓ Cancelled WORLD_EVENT 1010 from tracked jukebox at " + posKey);
+                } else {
+                    plugin.debug("Allowing WORLD_EVENT 1010 (not from tracked jukebox) at " + posKey);
                 }
-                
-                plugin.debug("✓ Cancelled WORLD_EVENT 1010 (jukebox play)");
             } else if (eventId == 1011) {
                 if (plugin.isDebugMode()) {
                     plugin.debug("WORLD_EVENT 1011 (jukebox stop)");
@@ -282,7 +306,7 @@ public class JukeboxListener implements Listener {
                 }
                 
                 Player player = event.getPlayer();
-                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                Bukkit.getRegionScheduler().runDelayed(plugin, player.getLocation(), (task) -> {
                     sendReplacementMessage(player);
                 }, 1L);
             }
@@ -313,7 +337,7 @@ public class JukeboxListener implements Listener {
                 }
                 
                 Player player = event.getPlayer();
-                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                Bukkit.getRegionScheduler().runDelayed(plugin, player.getLocation(), (task) -> {
                     sendReplacementMessage(player);
                 }, 1L);
             }
@@ -343,8 +367,21 @@ public class JukeboxListener implements Listener {
             Location jukeboxLoc = block.getLocation();
             knownJukeboxes.add(jukeboxLoc);
             
+            // Check if this disc type has a custom sound configured
+            String discType = item.getType().name();
+            ItemRemapperPlugin.ItemRemap remap = plugin.getItemRemap(discType);
+            
+            // Only track jukebox if the disc has a custom sound configured
+            if (remap != null && remap.hasCustomSound()) {
+                String posKey = jukeboxLoc.getBlockX() + "," + jukeboxLoc.getBlockY() + "," + jukeboxLoc.getBlockZ();
+                pendingJukeboxSounds.put(posKey, System.currentTimeMillis());
+                plugin.debug("Tracked jukebox at " + posKey + " for sound cancellation (custom sound: " + remap.getCustomSound() + ")");
+            } else {
+                plugin.debug("Disc " + discType + " has no custom sound - allowing vanilla playback");
+            }
+            
             // Schedule disc insertion check
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            Bukkit.getRegionScheduler().runDelayed(plugin, jukeboxLoc, (task) -> {
                 if (block.getState() instanceof Jukebox jukebox) {
                     handleDiscInsertion(jukebox);
                 }
@@ -356,8 +393,9 @@ public class JukeboxListener implements Listener {
                 ItemStack currentDisc = jukebox.getRecord();
                 if (currentDisc != null && currentDisc.getType() != Material.AIR) {
                     // Player is removing the disc
-                    Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                        handleDiscRemoval(jukebox.getLocation());
+                    Location loc = jukebox.getLocation();
+                    Bukkit.getRegionScheduler().runDelayed(plugin, loc, (task) -> {
+                        handleDiscRemoval(loc);
                     }, 1L);
                 }
             }
@@ -390,17 +428,17 @@ public class JukeboxListener implements Listener {
         plugin.debug("Starting custom sound playback: " + customSound + " (duration: " + duration + "s)");
         
         // Schedule auto-ejection if enabled
-        BukkitTask ejectionTask = null;
+        ScheduledTask ejectionTask = null;
         if (autoEject && duration > 0) {
-            ejectionTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            ejectionTask = Bukkit.getRegionScheduler().runDelayed(plugin, jukeboxLoc, (task) -> {
                 ejectDisc(jukeboxLoc);
             }, duration * 20L); // Convert seconds to ticks
         }
         
         // Start player tracking task
-        BukkitTask trackingTask = Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+        ScheduledTask trackingTask = Bukkit.getRegionScheduler().runAtFixedRate(plugin, jukeboxLoc, (task) -> {
             updatePlayersInRange(jukeboxLoc);
-        }, 0L, 20L); // Check every second
+        }, 1L, 20L); // Check every second
         
         // Create active jukebox entry
         ActiveJukebox activeJukebox = new ActiveJukebox(
@@ -500,6 +538,10 @@ public class JukeboxListener implements Listener {
         // Cancel tasks
         activeJukebox.cancel();
         
+        // Clean up position tracking
+        String posKey = jukeboxLoc.getBlockX() + "," + jukeboxLoc.getBlockY() + "," + jukeboxLoc.getBlockZ();
+        pendingJukeboxSounds.remove(posKey);
+        
         // Stop sound for all players who were hearing it
         for (UUID uuid : activeJukebox.playersHearing) {
             Player player = Bukkit.getPlayer(uuid);
@@ -542,9 +584,36 @@ public class JukeboxListener implements Listener {
     private void sendReplacementMessage(Player player) {
         if (!protocolLibAvailable) return;
         
-        Jukebox nearestJukebox = findNearestJukebox(player);
-        if (nearestJukebox != null) {
-            sendCustomMessageToPlayer(nearestJukebox, player);
+        // Find nearest jukebox location from cache
+        Location playerLoc = player.getLocation();
+        World world = playerLoc.getWorld();
+        if (world == null) return;
+        
+        Location nearestLoc = null;
+        double nearestDistance = Double.MAX_VALUE;
+        
+        for (Location loc : knownJukeboxes) {
+            if (!loc.getWorld().equals(world)) continue;
+            
+            double distance = playerLoc.distance(loc);
+            if (distance <= soundRange && distance < nearestDistance) {
+                nearestLoc = loc;
+                nearestDistance = distance;
+            }
+        }
+        
+        // If found, schedule message sending on that region
+        if (nearestLoc != null) {
+            Location finalLoc = nearestLoc;
+            Bukkit.getRegionScheduler().run(plugin, finalLoc, (task) -> {
+                Block block = finalLoc.getBlock();
+                if (block.getType() == Material.JUKEBOX && block.getState() instanceof Jukebox jukebox) {
+                    ItemStack record = jukebox.getRecord();
+                    if (record != null && record.getType() != Material.AIR) {
+                        sendCustomMessageToPlayer(jukebox, player);
+                    }
+                }
+            });
         }
     }
     
@@ -609,36 +678,7 @@ public class JukeboxListener implements Listener {
         player.spigot().sendMessage(ChatMessageType.ACTION_BAR, new TextComponent(message));
     }
     
-    /**
-     * Finds the nearest jukebox to a player
-     */
-    private Jukebox findNearestJukebox(Player player) {
-        Location playerLoc = player.getLocation();
-        World world = playerLoc.getWorld();
-        if (world == null) return null;
-        
-        Jukebox nearest = null;
-        double nearestDistance = Double.MAX_VALUE;
-        
-        for (Location loc : knownJukeboxes) {
-            if (!loc.getWorld().equals(world)) continue;
-            
-            double distance = playerLoc.distance(loc);
-            if (distance <= soundRange && distance < nearestDistance) {
-                Block block = loc.getBlock();
-                if (block.getType() == Material.JUKEBOX && block.getState() instanceof Jukebox) {
-                    Jukebox jukebox = (Jukebox) block.getState();
-                    ItemStack record = jukebox.getRecord();
-                    if (record != null && record.getType() != Material.AIR) {
-                        nearest = jukebox;
-                        nearestDistance = distance;
-                    }
-                }
-            }
-        }
-        
-        return nearest;
-    }
+
     
     /**
      * Starts the jukebox scanner
@@ -646,7 +686,7 @@ public class JukeboxListener implements Listener {
     public void startJukeboxScanner() {
         // Fast scanner for state changes (every 0.5 seconds)
         // This catches hopper insertions quickly
-        Bukkit.getScheduler().runTaskTimer(plugin, this::scanJukeboxes, 10L, 10L);
+        Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, (task) -> this.scanJukeboxes(), 10L, 10L);
         
         if (plugin.isDebugMode()) {
             plugin.getLogger().info("Jukebox scanner started (checks every 0.5s for hopper insertions)");
@@ -660,71 +700,109 @@ public class JukeboxListener implements Listener {
         // Periodically discover new jukeboxes (every 5 seconds)
         long currentTime = System.currentTimeMillis();
         if (currentTime - lastDiscoveryTime > DISCOVERY_INTERVAL) {
-            discoverJukeboxes();
+            Bukkit.getAsyncScheduler().runNow(plugin, (task) -> discoverJukeboxes());
             lastDiscoveryTime = currentTime;
         }
         
         // Always check known jukeboxes for state changes
-        Iterator<Location> iterator = knownJukeboxes.iterator();
+        // Create a copy to avoid concurrent modification
+        Set<Location> locationsToCheck = new HashSet<>(knownJukeboxes);
         
-        while (iterator.hasNext()) {
-            Location loc = iterator.next();
-            Block block = loc.getBlock();
-            
-            if (block.getType() != Material.JUKEBOX) {
-                iterator.remove();
-                stopJukeboxPlayback(loc);
-                continue;
-            }
-            
-            if (block.getState() instanceof Jukebox jukebox) {
-                ItemStack record = jukebox.getRecord();
-                ActiveJukebox activeJukebox = activeJukeboxes.get(loc);
-                
-                String currentDiscType = null;
-                if (record != null && record.getType() != Material.AIR) {
-                    currentDiscType = record.getType().name();
-                }
-                
-                // Case 1: Disc was removed
-                if (currentDiscType == null && activeJukebox != null) {
-                    handleDiscRemoval(loc);
-                    plugin.debug("Scanner detected disc removal at " + loc);
-                }
-                // Case 2: New disc was inserted (or different disc)
-                else if (currentDiscType != null && 
-                        (activeJukebox == null || !currentDiscType.equals(activeJukebox.discType))) {
-                    plugin.debug("Scanner detected disc insertion: " + currentDiscType + " at " + loc);
-                    handleDiscInsertion(jukebox);
-                }
+        // Group locations by world/region to batch operations
+        Map<World, List<Location>> locationsByWorld = new HashMap<>();
+        for (Location loc : locationsToCheck) {
+            locationsByWorld.computeIfAbsent(loc.getWorld(), k -> new ArrayList<>()).add(loc);
+        }
+        
+        // Process each world's locations in batched region tasks
+        for (Map.Entry<World, List<Location>> entry : locationsByWorld.entrySet()) {
+            for (Location loc : entry.getValue()) {
+                // Schedule check on the appropriate region
+                Bukkit.getRegionScheduler().run(plugin, loc, (task) -> {
+                    Block block = loc.getBlock();
+                    
+                    if (block.getType() != Material.JUKEBOX) {
+                        knownJukeboxes.remove(loc);
+                        stopJukeboxPlayback(loc);
+                        return;
+                    }
+                    
+                    if (block.getState() instanceof Jukebox jukebox) {
+                        ItemStack record = jukebox.getRecord();
+                        ActiveJukebox activeJukebox = activeJukeboxes.get(loc);
+                        
+                        String currentDiscType = null;
+                        if (record != null && record.getType() != Material.AIR) {
+                            currentDiscType = record.getType().name();
+                        }
+                        
+                        // Case 1: Disc was removed
+                        if (currentDiscType == null && activeJukebox != null) {
+                            handleDiscRemoval(loc);
+                            plugin.debug("Scanner detected disc removal at " + loc);
+                        }
+                        // Case 2: New disc was inserted (or different disc)
+                        else if (currentDiscType != null && 
+                                (activeJukebox == null || !currentDiscType.equals(activeJukebox.discType))) {
+                            plugin.debug("Scanner detected disc insertion: " + currentDiscType + " at " + loc);
+                            handleDiscInsertion(jukebox);
+                        }
+                    }
+                });
             }
         }
     }
     
     /**
      * Discovers jukeboxes in loaded chunks near players
+     * Called from async scheduler to avoid blocking
      */
     private void discoverJukeboxes() {
         for (World world : Bukkit.getWorlds()) {
-            // Only scan worlds with players
+            // Only scan worlds with players (thread-safe snapshot)
             if (world.getPlayers().isEmpty()) continue;
             
-            // Scan loaded chunks for jukebox tile entities
-            for (org.bukkit.Chunk chunk : world.getLoadedChunks()) {
+            // Get loaded chunks snapshot (thread-safe)
+            org.bukkit.Chunk[] chunks = world.getLoadedChunks();
+            
+            // Collect chunk locations to scan
+            List<Location> chunkLocations = new ArrayList<>();
+            for (org.bukkit.Chunk chunk : chunks) {
                 // Only scan chunks near players (within 8 chunks)
                 if (!hasPlayersNearChunk(chunk, 8)) continue;
                 
-                for (org.bukkit.block.BlockState state : chunk.getTileEntities()) {
-                    if (state instanceof Jukebox) {
-                        Location loc = state.getLocation();
-                        if (!knownJukeboxes.contains(loc)) {
-                            knownJukeboxes.add(loc);
-                            if (plugin.isDebugMode()) {
-                                plugin.debug("Discovered jukebox at " + loc);
+                // Store chunk center location for scheduling
+                chunkLocations.add(chunk.getBlock(8, 64, 8).getLocation());
+            }
+            
+            // Schedule chunk scans on the appropriate regions
+            for (Location chunkLoc : chunkLocations) {
+                Bukkit.getRegionScheduler().run(plugin, chunkLoc, (task) -> {
+                    // Re-get chunk on the correct thread to avoid cross-thread access
+                    World taskWorld = chunkLoc.getWorld();
+                    if (taskWorld == null) return;
+                    
+                    // Safely get the chunk on the region thread
+                    int chunkX = chunkLoc.getBlockX() >> 4;
+                    int chunkZ = chunkLoc.getBlockZ() >> 4;
+                    
+                    if (!taskWorld.isChunkLoaded(chunkX, chunkZ)) return;
+                    
+                    org.bukkit.Chunk regionChunk = taskWorld.getChunkAt(chunkX, chunkZ);
+                    
+                    // Access tile entities on the correct region thread
+                    for (org.bukkit.block.BlockState state : regionChunk.getTileEntities()) {
+                        if (state instanceof Jukebox) {
+                            Location loc = state.getLocation();
+                            if (!knownJukeboxes.contains(loc)) {
+                                knownJukeboxes.add(loc);
+                                if (plugin.isDebugMode()) {
+                                    plugin.debug("Discovered jukebox at " + loc);
+                                }
                             }
                         }
                     }
-                }
+                });
             }
         }
     }
@@ -753,10 +831,17 @@ public class JukeboxListener implements Listener {
      * Starts cleanup task
      */
     public void startCacheCleanupTask() {
-        Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+        Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, (task) -> {
             long currentTime = System.currentTimeMillis();
+            
+            // Clean up old message timestamps
             sentCustomMessages.entrySet().removeIf(entry -> 
                 (currentTime - entry.getValue()) > MESSAGE_COOLDOWN * 2
+            );
+            
+            // Clean up old jukebox position timestamps
+            pendingJukeboxSounds.entrySet().removeIf(entry ->
+                (currentTime - entry.getValue()) > JUKEBOX_SOUND_WINDOW * 2
             );
         }, 100L, 100L);
     }

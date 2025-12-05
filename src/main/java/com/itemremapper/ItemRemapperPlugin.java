@@ -89,7 +89,12 @@ public class ItemRemapperPlugin extends JavaPlugin {
         getCommand("itemremapper").setExecutor(commandHandler);
         getCommand("itemremapper").setTabCompleter(commandHandler);
         
-        getLogger().info("ItemRemapper has been enabled!");
+        // Log server type
+        if (isFolia()) {
+            getLogger().info("ItemRemapper has been enabled on Folia!");
+        } else {
+            getLogger().info("ItemRemapper has been enabled on Paper/Spigot!");
+        }
         getLogger().info("Loaded " + itemRemaps.size() + " item remappings.");
     }
 
@@ -189,6 +194,20 @@ public class ItemRemapperPlugin extends JavaPlugin {
     public void debug(String message) {
         if (debugMode) {
             getLogger().log(Level.INFO, "[DEBUG] " + message);
+        }
+    }
+
+    /**
+     * Checks if the server is running Folia
+     * 
+     * @return true if running on Folia, false otherwise
+     */
+    public static boolean isFolia() {
+        try {
+            Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
+            return true;
+        } catch (ClassNotFoundException e) {
+            return false;
         }
     }
 }

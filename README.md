@@ -11,9 +11,19 @@ Ein leichtgewichtiges Spigot 1.21.1 Plugin, das Items beim Einsammeln oder Versc
 
 ## Voraussetzungen
 
-- Spigot/Paper 1.21.1 oder kompatibel
+- Paper 1.21.1 oder Folia 1.21.1
 - Java 21+
 - (Optional) ProtocolLib für Jukebox-Nachrichten
+
+## Folia Support
+
+Dieses Plugin unterstützt **vollständig Folia**, den multi-threaded Fork von Paper. Das Plugin nutzt:
+
+- **Region Scheduler** für ortsgebundene Operationen (z.B. Jukebox-Handling)
+- **Global Region Scheduler** für globale Tasks (z.B. periodische Scans)
+- **Entity Scheduler** für entity-bezogene Operationen
+
+Das Plugin erkennt automatisch, ob es auf Folia oder Paper läuft und verhält sich entsprechend. Keine zusätzliche Konfiguration erforderlich!
 
 ## Installation
 
